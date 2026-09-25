@@ -76,3 +76,46 @@ fun relativeTime(ts: Long, now: Long = System.currentTimeMillis()): String {
         else -> formatDate(ts, "d MMM")
     }
 }
+
+/** Short name used in lists, e.g. "500ml Clear"; the category when the product has no variant. */
+val ProductEntity.shortTitle: String
+    get() = when {
+        unit == StockUnit.BAGS -> if (name.equals("Standard", true)) category.toTitleCase() else name
+        name.equals("Standard", true) -> listOf(size, category.toTitleCase()).filter { it.isNotBlank() }.joinToString(" ")
+        else -> listOf(size, name).filter { it.isNotBlank() }.joinToString(" ")
+    }
+
+/** What kind of product it is, shown under [shortTitle]. */
+val ProductEntity.kind: String
+    get() = when {
+        unit == StockUnit.BAGS -> "Raw material"
+        name.equals("Standard", true) -> ""
+        else -> category.toTitleCase()
+    }
+
+/** Stock level for bars: full at three times the reorder level, with a sliver while any stock is left. */
+val ProductEntity.levelFraction: Float
+    get() = when {
+        quantity <= 0 -> 0f
+        reorderLevel <= 0 -> 1f
+        else -> (quantity.toFloat() / (reorderLevel * 3)).coerceIn(0.03f, 1f)
+    }
+
+fun startOfDay(ts: Long): Long = java.util.Calendar.getInstance().run {
+    timeInMillis = ts
+    set(java.util.Calendar.HOUR_OF_DAY, 0)
+    set(java.util.Calendar.MINUTE, 0)
+    set(java.util.Calendar.SECOND, 0)
+    set(java.util.Calendar.MILLISECOND, 0)
+    timeInMillis
+}
+
+/** "Today", "Yesterday" or "Wednesday 23 Sep". */
+fun dayLabel(ts: Long, now: Long = System.currentTimeMillis()): String {
+    val days = Math.round((startOfDay(now) - startOfDay(ts)) / (24 * 60 * 60 * 1000.0))
+    return when (days) {
+        0L -> "Today"
+        1L -> "Yesterday"
+        else -> formatDate(ts, "EEEE d MMM")
+    }
+}

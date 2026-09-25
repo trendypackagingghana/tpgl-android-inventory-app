@@ -1,52 +1,57 @@
 package com.example.tpglstock.ui.addstock
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowForward
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.FactCheck
-import androidx.compose.material.icons.rounded.Inventory2
-import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.material.icons.automirrored.rounded.Backspace
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.UnfoldMore
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -54,22 +59,27 @@ import androidx.lifecycle.viewModelScope
 import com.example.tpglstock.data.ChangeMode
 import com.example.tpglstock.data.StockChange
 import com.example.tpglstock.data.StockRepository
-import com.example.tpglstock.data.bagsText
 import com.example.tpglstock.data.grouped
+import com.example.tpglstock.data.kind
 import com.example.tpglstock.data.label
 import com.example.tpglstock.data.local.MovementSource
 import com.example.tpglstock.data.local.ProductEntity
 import com.example.tpglstock.data.local.StockUnit
 import com.example.tpglstock.data.quantityText
-import com.example.tpglstock.data.subtitle
-import com.example.tpglstock.data.title
-import com.example.tpglstock.ui.components.AppCard
-import com.example.tpglstock.ui.components.IconBadge
-import com.example.tpglstock.ui.components.ProductRow
-import com.example.tpglstock.ui.components.SegmentedToggle
-import com.example.tpglstock.ui.components.ThinDivider
-import com.example.tpglstock.ui.inventory.SearchField
+import com.example.tpglstock.data.shortTitle
+import com.example.tpglstock.data.unitLabel
+import com.example.tpglstock.ui.appViewModel
+import com.example.tpglstock.ui.components.BackBar
+import com.example.tpglstock.ui.components.FilterPill
+import com.example.tpglstock.ui.components.LocalToast
+import com.example.tpglstock.ui.components.ProductLine
+import com.example.tpglstock.ui.components.RowDivider
+import com.example.tpglstock.ui.components.SearchBox
+import com.example.tpglstock.ui.components.SegmentTabs
+import com.example.tpglstock.ui.components.SheetHandle
+import com.example.tpglstock.ui.components.Swatch
 import com.example.tpglstock.ui.theme.StockTheme
+import com.example.tpglstock.ui.theme.mono
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -78,7 +88,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class ManualEntryViewModel(private val repo: StockRepository, handle: SavedStateHandle) : ViewModel() {
-    val initialMode: String = handle.initialMode()
+    val initialMode: ChangeMode = handle.get<String>("mode")?.let { m -> ChangeMode.entries.find { it.name == m } } ?: ChangeMode.ADD
     private val selectedId = MutableStateFlow(handle.get<Long>("productId")?.takeIf { it > 0 })
 
     val products: StateFlow<List<ProductEntity>> =
@@ -94,111 +104,183 @@ class ManualEntryViewModel(private val repo: StockRepository, handle: SavedState
         repo.applyChanges(listOf(StockChange(product.id, mode, amount, note)), MovementSource.MANUAL)
 }
 
+private fun newQuantity(p: ProductEntity, mode: ChangeMode, amount: Long) = when (mode) {
+    ChangeMode.ADD -> p.quantity + amount
+    ChangeMode.REMOVE -> (p.quantity - amount).coerceAtLeast(0)
+    ChangeMode.SET -> amount
+}
+
+/** Log stock in, out or a count for one product with a large keypad. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun ManualEntry(vm: ManualEntryViewModel, modifier: Modifier = Modifier) {
+fun LogStockScreen(onClose: () -> Unit, onSaved: (Long) -> Unit) {
+    val vm = appViewModel { c, h -> ManualEntryViewModel(c.repository, h) }
     val products by vm.products.collectAsStateWithLifecycle()
     val product by vm.selected.collectAsStateWithLifecycle()
-    var mode by remember { mutableStateOf(ChangeMode.ADD) }
-    var amount by remember { mutableStateOf<Long?>(null) }
-    var note by remember { mutableStateOf("") }
-    var formKey by remember { mutableIntStateOf(0) }
+    var mode by rememberSaveable { mutableStateOf(vm.initialMode) }
+    var digits by rememberSaveable { mutableStateOf("") }
+    var inBags by rememberSaveable { mutableStateOf(false) }
+    var note by rememberSaveable { mutableStateOf("") }
     var pickerOpen by remember { mutableStateOf(false) }
-    val snackbar = remember { SnackbarHostState() }
+    var saving by remember { mutableStateOf(false) }
+    val toast = LocalToast.current
     val scope = rememberCoroutineScope()
+    val c = StockTheme.colors
 
-    Column(modifier) {
-        Column(
+    val p = product
+    val bagged = p != null && p.unit == StockUnit.PCS && p.pcsPerBag > 0
+    val typed = digits.toLongOrNull() ?: 0L
+    val amount = if (bagged && inBags) typed * p!!.pcsPerBag else typed
+    val next = p?.let { newQuantity(it, mode, amount) }
+    val canSave = p != null && digits.isNotEmpty() && next != p.quantity && !saving
+    val unitText = when {
+        p == null -> "pcs"
+        bagged && inBags -> if (typed == 1L) "bag" else "bags"
+        else -> unitLabel(p.unit, amount)
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .navigationBarsPadding()
+            .imePadding()
+            .verticalScroll(rememberScrollState())
+            .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        BackBar(onClose, Modifier.padding(start = 0.dp), title = "Log stock", icon = Icons.Rounded.Close, iconDescription = "Close")
+
+        Row(
             Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .background(c.surface)
+                .clickable(onClickLabel = "Choose product") { pickerOpen = true }
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            SegmentedToggle(
-                options = listOf(ChangeMode.ADD to "Stock in", ChangeMode.REMOVE to "Stock out", ChangeMode.SET to "Count"),
-                selected = mode,
-                onSelect = { mode = it },
-                icons = mapOf(ChangeMode.ADD to Icons.Rounded.Add, ChangeMode.REMOVE to Icons.Rounded.Remove, ChangeMode.SET to Icons.Rounded.FactCheck),
-            )
-
-            AppCard(onClick = { pickerOpen = true }) {
-                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconBadge(Icons.Rounded.Inventory2, MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        val p = product
-                        if (p == null) {
-                            Text("Choose product", style = MaterialTheme.typography.titleSmall)
-                            Text("Tap to search ${products.size} products", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        } else {
-                            Text(p.title, style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                listOf(p.subtitle, "On hand: ${p.quantityText()}").filter { it.isNotBlank() }.joinToString(" · "),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    Icon(Icons.Rounded.UnfoldMore, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-
-            product?.let { p ->
-                key(p.id, formKey) {
-                    QuantityInput(product = p, onAmountChange = { amount = it })
-                }
-                OutlinedTextField(
-                    value = note,
-                    onValueChange = { note = it },
-                    label = { Text("Note (optional)") },
-                    placeholder = { Text("e.g. Supplied to Kumasi customer") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
+            if (p != null) Swatch(p, 36.dp) else Swatch("", 36.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(p?.shortTitle ?: "Choose a product", style = MaterialTheme.typography.titleSmall.copy(fontSize = 15.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    if (p == null) "${products.size} products" else listOf(p.kind, "${p.quantityText()} now").filter { it.isNotBlank() }.joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = c.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                amount?.let { a -> ChangePreview(p, mode, a) }
             }
-            Spacer(Modifier.height(8.dp))
+            Icon(Icons.Rounded.UnfoldMore, contentDescription = null, tint = c.muted, modifier = Modifier.size(22.dp))
         }
 
-        SnackbarHost(snackbar)
-        Button(
-            onClick = {
-                val p = product ?: return@Button
-                val a = amount ?: return@Button
-                scope.launch {
-                    val applied = try {
-                        vm.save(p, mode, a, note.trim())
-                    } catch (e: java.io.IOException) {
-                        snackbar.showSnackbar("Not saved — ${e.message ?: "can't reach the server"}")
-                        return@launch
-                    }
-                    amount = null
-                    note = ""
-                    formKey++
-                    snackbar.showSnackbar(if (applied > 0) "Saved · ${p.label}" else "No change — quantity is the same")
+        SegmentTabs(
+            options = listOf(ChangeMode.ADD to "Stock in", ChangeMode.REMOVE to "Stock out", ChangeMode.SET to "Count"),
+            selected = mode,
+            onSelect = { mode = it },
+            textStyle = MaterialTheme.typography.labelLarge,
+            verticalPadding = 9.dp,
+        )
+
+        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                when (mode) {
+                    ChangeMode.ADD -> "How many came in?"
+                    ChangeMode.REMOVE -> "How many went out?"
+                    ChangeMode.SET -> "How many are on the shelf?"
+                },
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                color = c.muted,
+            )
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    if (digits.isEmpty()) "0" else typed.grouped(),
+                    style = mono(56.sp, letterSpacing = (-1.7).sp).copy(lineHeight = 62.sp),
+                    color = if (digits.isEmpty()) c.placeholder else c.ink,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(unitText, style = MaterialTheme.typography.bodyLarge, color = c.muted, modifier = Modifier.padding(bottom = 10.dp))
+            }
+            if (p != null && next != null) {
+                Text(
+                    buildString {
+                        append("${p.quantity.grouped()} → ${next.grouped()} ${unitLabel(p.unit, next)}")
+                        if (bagged && inBags && typed > 0) append(" · ${amount.grouped()} pcs")
+                    },
+                    style = mono(13.sp, FontWeight.Normal),
+                    color = c.muted,
+                )
+                if (mode == ChangeMode.REMOVE && amount > p.quantity) {
+                    Text("Only ${p.quantityText()} on hand. Stock will be set to 0.", style = MaterialTheme.typography.bodySmall, color = c.low.fg)
                 }
-            },
-            enabled = product != null && amount != null,
-            modifier = Modifier
+            }
+            if (bagged) {
+                Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterPill("Pieces", !inBags) { inBags = false }
+                    FilterPill("Bags of ${p!!.pcsPerBag.grouped()}", inBags) { inBags = true }
+                }
+            }
+        }
+
+        Keypad(onKey = { k ->
+            digits = when (k) {
+                "del" -> digits.dropLast(1)
+                // Keep a single "0" so a count of zero can be saved.
+                else -> (digits + k).trimStart('0').ifEmpty { "0" }.take(7)
+            }
+        })
+
+        NoteField(note, { note = it })
+
+        val label = when {
+            p == null -> "Choose a product"
+            digits.isEmpty() -> "Enter an amount"
+            next == p.quantity -> "No change"
+            saving -> "Saving…"
+            mode == ChangeMode.SET -> "Save count · ${next!!.grouped()} ${unitLabel(p.unit, next)}"
+            else -> "Save · ${if (mode == ChangeMode.ADD) "+" else "−"}${amount.grouped()} ${unitLabel(p.unit, amount)}"
+        }
+        Box(
+            Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
-                .imePadding()
-                .height(54.dp),
+                .height(56.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(if (canSave) c.ink else c.disabledBg)
+                .clickable(enabled = canSave, role = Role.Button) {
+                    val prod = p ?: return@clickable
+                    saving = true
+                    scope.launch {
+                        try {
+                            vm.save(prod, mode, amount, note.trim())
+                            toast.show("Saved. ${prod.shortTitle} is now ${prod.quantityText(next!!)}")
+                            onSaved(prod.id)
+                        } catch (e: java.io.IOException) {
+                            toast.show("Not saved: ${e.message ?: "can't reach the server"}", error = true)
+                        } finally {
+                            saving = false
+                        }
+                    }
+                },
+            contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Rounded.CheckCircle, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text("Save")
+            Text(label, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold), color = if (canSave) c.onInk else c.disabledFg)
         }
     }
 
     if (pickerOpen) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(onDismissRequest = { pickerOpen = false }, sheetState = sheetState) {
+        ModalBottomSheet(
+            onDismissRequest = { pickerOpen = false },
+            sheetState = sheetState,
+            containerColor = c.paper,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            dragHandle = { SheetHandle() },
+        ) {
             ProductPicker(products) {
                 vm.select(it.id)
-                amount = null
-                formKey++
+                digits = ""
+                inBags = false
                 pickerOpen = false
             }
         }
@@ -206,118 +288,72 @@ internal fun ManualEntry(vm: ManualEntryViewModel, modifier: Modifier = Modifier
 }
 
 @Composable
-private fun ProductPicker(products: List<ProductEntity>, onPick: (ProductEntity) -> Unit) {
-    var query by remember { mutableStateOf("") }
-    val terms = query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
-    val filtered = products.filter { p -> terms.all { it in p.label.lowercase() } }
-    Column(Modifier.fillMaxHeight(0.9f).navigationBarsPadding()) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text("Choose product", style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(12.dp))
-            SearchField(query, { query = it })
-        }
-        LazyColumn(Modifier.fillMaxWidth().imePadding()) {
-            items(filtered, key = { it.id }) { p ->
-                ProductRow(p, onClick = { onPick(p) })
-                ThinDivider()
+private fun Keypad(onKey: (String) -> Unit) {
+    val c = StockTheme.colors
+    val keys = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "00", "0", "del")
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        keys.chunked(3).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { k ->
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .height(54.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(c.surface)
+                            .clickable(role = Role.Button, onClickLabel = if (k == "del") "Delete digit" else k) { onKey(k) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (k == "del") Icon(Icons.AutoMirrored.Rounded.Backspace, contentDescription = "Delete digit", modifier = Modifier.size(24.dp))
+                        else Text(k, style = mono(22.sp, FontWeight.Normal))
+                    }
+                }
             }
         }
     }
 }
 
-/**
- * Quantity entry that understands bags. For bagged piece products the user can enter
- * bags and loose pieces; the total in pieces is reported via [onAmountChange].
- */
 @Composable
-fun QuantityInput(product: ProductEntity, onAmountChange: (Long?) -> Unit) {
-    val bagged = product.unit == StockUnit.PCS && product.pcsPerBag > 0
-    var bags by remember { mutableStateOf("") }
-    var pcs by remember { mutableStateOf("") }
-
-    LaunchedEffect(bags, pcs) {
-        val b = bags.toLongOrNull()
-        val p = pcs.toLongOrNull()
-        onAmountChange(
-            when {
-                b == null && p == null -> null
-                bagged -> (b ?: 0) * product.pcsPerBag + (p ?: 0)
-                else -> p
-            },
-        )
-    }
-
-    if (bagged) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                DigitField(bags, { bags = it }, "Bags", Modifier.weight(1f))
-                DigitField(pcs, { pcs = it }, "Loose pcs", Modifier.weight(1f))
-            }
-            val total = (bags.toLongOrNull() ?: 0) * product.pcsPerBag + (pcs.toLongOrNull() ?: 0)
-            Text(
-                "1 bag = ${product.pcsPerBag.grouped()} pcs · total ${total.grouped()} pcs",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    } else {
-        DigitField(pcs, { pcs = it }, if (product.unit == StockUnit.BAGS) "Bags" else "Pieces", Modifier.fillMaxWidth())
-    }
-}
-
-@Composable
-private fun DigitField(value: String, onChange: (String) -> Unit, label: String, modifier: Modifier) {
-    OutlinedTextField(
+private fun NoteField(value: String, onChange: (String) -> Unit) {
+    val c = StockTheme.colors
+    BasicTextField(
         value = value,
-        onValueChange = { v -> onChange(v.filter { it.isDigit() }.take(9)) },
-        label = { Text(label) },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        onValueChange = onChange,
         singleLine = true,
-        modifier = modifier,
-        textStyle = MaterialTheme.typography.titleLarge,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(color = c.ink),
+        cursorBrush = SolidColor(c.accent),
+        decorationBox = { inner ->
+            Box(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.surface).padding(horizontal = 14.dp, vertical = 13.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                if (value.isEmpty()) Text("Add a note (optional)", style = MaterialTheme.typography.bodyMedium, color = c.faint)
+                inner()
+            }
+        },
     )
 }
 
 @Composable
-private fun ChangePreview(product: ProductEntity, mode: ChangeMode, amount: Long) {
-    val newQty = when (mode) {
-        ChangeMode.ADD -> product.quantity + amount
-        ChangeMode.REMOVE -> (product.quantity - amount).coerceAtLeast(0)
-        ChangeMode.SET -> amount
-    }
-    val delta = newQty - product.quantity
-    AppCard {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Now", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(product.quantityText(), style = MaterialTheme.typography.titleMedium)
-                product.bagsText()?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            }
-            Icon(Icons.AutoMirrored.Rounded.ArrowForward, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-                Text("After", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(product.quantityText(newQty), style = MaterialTheme.typography.titleMedium)
-                Text(
-                    when {
-                        delta > 0 -> "+${delta.grouped()}"
-                        delta < 0 -> "−${(-delta).grouped()}"
-                        else -> "No change"
-                    },
-                    style = MaterialTheme.typography.labelLarge,
-                    color = when {
-                        delta > 0 -> StockTheme.colors.seriesIn
-                        delta < 0 -> StockTheme.colors.seriesOut
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
+private fun ProductPicker(products: List<ProductEntity>, onPick: (ProductEntity) -> Unit) {
+    var query by remember { mutableStateOf("") }
+    val terms = query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
+    val filtered = products.filter { p -> terms.all { it in p.label.lowercase() } }
+    val c = StockTheme.colors
+    Column(
+        Modifier.fillMaxHeight(0.85f).navigationBarsPadding().imePadding().padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("Choose a product", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 4.dp, top = 4.dp))
+        SearchBox(query, { query = it }, "Search colour, size, product")
+        LazyColumn(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(c.surface),
+            contentPadding = PaddingValues(0.dp),
+        ) {
+            itemsIndexed(filtered, key = { _, p -> p.id }) { i, p ->
+                if (i > 0) RowDivider()
+                ProductLine(p, onClick = { onPick(p) }, swatchSize = 28.dp)
             }
         }
-    }
-    if (mode == ChangeMode.REMOVE && amount > product.quantity) {
-        Text(
-            "Only ${product.quantityText()} on hand — stock will be set to 0.",
-            style = MaterialTheme.typography.bodySmall,
-            color = StockTheme.colors.warn,
-        )
     }
 }

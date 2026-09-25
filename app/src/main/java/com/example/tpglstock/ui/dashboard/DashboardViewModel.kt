@@ -2,6 +2,7 @@ package com.example.tpglstock.ui.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.tpglstock.data.SettingsStore
 import com.example.tpglstock.data.StockRepository
 import com.example.tpglstock.data.StockStatus
 import com.example.tpglstock.data.SyncStatus
@@ -9,50 +10,58 @@ import com.example.tpglstock.data.local.MovementEntity
 import com.example.tpglstock.data.local.MovementType
 import com.example.tpglstock.data.local.ProductEntity
 import com.example.tpglstock.data.local.StockUnit
+import com.example.tpglstock.data.startOfDay
 import com.example.tpglstock.data.status
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import java.util.Calendar
 
 data class DayActivity(val dayStart: Long, val increase: Long, val decrease: Long, val updates: Int)
 
+/** A frequently updated product and how often it changed. */
+data class Mover(val product: ProductEntity, val detail: String)
+
 data class DashboardState(
     val loading: Boolean = true,
+    val name: String = "",
+    /** Out-of-stock products first, then low ones. */
+    val attention: List<ProductEntity> = emptyList(),
+    val outCount: Int = 0,
     /** Bag-counted raw materials (blow and injection material), largest first. */
     val rawMaterials: List<ProductEntity> = emptyList(),
-    /** Piece-counted products with the most stock updates recently. */
-    val popular: List<ProductEntity> = emptyList(),
-    val inStock: Int = 0,
-    val low: List<ProductEntity> = emptyList(),
-    val out: List<ProductEntity> = emptyList(),
+    val movers: List<Mover> = emptyList(),
     val week: List<DayActivity> = emptyList(),
+    val todayUpdates: Int = 0,
     /** When the newest recorded movement happened (its data date), not when it was uploaded. */
     val lastUpdate: Long? = null,
     val sync: SyncStatus = SyncStatus(),
 )
 
-class DashboardViewModel(private val repo: StockRepository) : ViewModel() {
+class DashboardViewModel(private val repo: StockRepository, settings: SettingsStore) : ViewModel() {
 
-    private val weekStart: Long = startOfDay(System.currentTimeMillis()) - 6 * DAY
+    private val today: Long = startOfDay(System.currentTimeMillis())
+    private val weekStart: Long = today - 6 * DAY
 
     val state: StateFlow<DashboardState> = combine(
         repo.products,
         repo.movements,
         repo.status,
-    ) { products, movements, status ->
-        val week = movements.filter { it.timestamp >= weekStart }
+        settings.userName,
+    ) { products, movements, status, name ->
+        val out = products.filter { it.status == StockStatus.OUT }
+        val low = products.filter { it.status == StockStatus.LOW }.sortedBy { it.quantity }
         DashboardState(
             loading = !status.loaded,
+            name = name,
+            attention = out + low,
+            outCount = out.size,
             rawMaterials = products.filter { it.unit == StockUnit.BAGS }.sortedByDescending { it.quantity },
-            popular = popular(products, movements),
-            inStock = products.count { it.status == StockStatus.OK },
-            low = products.filter { it.status == StockStatus.LOW }.sortedBy { it.quantity },
-            out = products.filter { it.status == StockStatus.OUT },
-            week = buildWeek(week),
+            movers = movers(products, movements),
+            week = buildWeek(movements.filter { it.timestamp >= weekStart }),
+            todayUpdates = movements.count { it.timestamp >= today && it.type != MovementType.OPENING },
             lastUpdate = movements.maxOfOrNull { it.timestamp },
             sync = status,
         )
@@ -80,18 +89,33 @@ class DashboardViewModel(private val repo: StockRepository) : ViewModel() {
     }
 
     /**
-     * Ranks piece-counted products by how often they were updated in the last
-     * [POPULAR_WINDOW], then all time. Products never updated are left out.
+     * Piece-counted products ranked by updates this week, then the last [RECENT_WINDOW], then all time.
+     * Products never updated are left out.
      */
-    private fun popular(products: List<ProductEntity>, movements: List<MovementEntity>): List<ProductEntity> {
+    private fun movers(products: List<ProductEntity>, movements: List<MovementEntity>): List<Mover> {
         val tracked = movements.filter { it.type != MovementType.OPENING && it.unit == StockUnit.PCS }
-        val since = System.currentTimeMillis() - POPULAR_WINDOW
+        val since = System.currentTimeMillis() - RECENT_WINDOW
+        val week = tracked.filter { it.timestamp >= weekStart }.groupingBy { it.productId }.eachCount()
         val recent = tracked.filter { it.timestamp >= since }.groupingBy { it.productId }.eachCount()
         val allTime = tracked.groupingBy { it.productId }.eachCount()
         return products
             .filter { it.unit == StockUnit.PCS && it.id in allTime }
-            .sortedWith(compareByDescending<ProductEntity> { recent[it.id] ?: 0 }.thenByDescending { allTime[it.id] ?: 0 })
-            .take(POPULAR_COUNT)
+            .sortedWith(
+                compareByDescending<ProductEntity> { week[it.id] ?: 0 }
+                    .thenByDescending { recent[it.id] ?: 0 }
+                    .thenByDescending { allTime[it.id] ?: 0 },
+            )
+            .take(MOVER_COUNT)
+            .map { p ->
+                val w = week[p.id] ?: 0
+                val r = recent[p.id] ?: 0
+                val detail = when {
+                    w > 0 -> "${plural(w, "update")} this week"
+                    r > 0 -> "${plural(r, "update")} in 30 days"
+                    else -> plural(allTime[p.id] ?: 0, "update")
+                }
+                Mover(p, detail)
+            }
     }
 
     private fun buildWeek(movements: List<MovementEntity>): List<DayActivity> {
@@ -103,7 +127,7 @@ class DashboardViewModel(private val repo: StockRepository) : ViewModel() {
                 dayStart = start,
                 increase = day.filter { it.delta > 0 }.sumOf { it.delta },
                 decrease = day.filter { it.delta < 0 }.sumOf { -it.delta },
-                updates = day.size,
+                updates = movements.count { it.timestamp in start until start + DAY && it.type != MovementType.OPENING },
             )
         }
     }
@@ -111,16 +135,9 @@ class DashboardViewModel(private val repo: StockRepository) : ViewModel() {
     private companion object {
         const val DAY = 24 * 60 * 60 * 1000L
         const val PULL_INTERVAL = 60_000L
-        const val POPULAR_WINDOW = 30 * DAY
-        const val POPULAR_COUNT = 5
+        const val RECENT_WINDOW = 30 * DAY
+        const val MOVER_COUNT = 3
 
-        fun startOfDay(ts: Long): Long = Calendar.getInstance().run {
-            timeInMillis = ts
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-            timeInMillis
-        }
+        fun plural(n: Int, word: String) = "$n $word${if (n == 1) "" else "s"}"
     }
 }

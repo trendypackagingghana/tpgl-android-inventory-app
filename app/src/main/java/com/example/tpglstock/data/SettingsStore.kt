@@ -58,6 +58,15 @@ class SettingsStore(context: Context) {
     )
     val ai: StateFlow<AiSettings> = _ai.asStateFlow()
 
+    private val _userName = MutableStateFlow(prefs.getString(KEY_NAME, null) ?: DEFAULT_NAME)
+    /** What the app calls the person using this phone. Kumar until changed on the You tab. */
+    val userName: StateFlow<String> = _userName.asStateFlow()
+
+    fun saveUserName(name: String) {
+        prefs.edit().putString(KEY_NAME, name.trim()).apply()
+        _userName.value = name.trim()
+    }
+
     fun save(settings: AiSettings) {
         prefs.edit()
             .putString(KEY_API, settings.apiKey.trim())
@@ -74,5 +83,7 @@ class SettingsStore(context: Context) {
         const val KEY_API = "deepseek_api_key"
         const val KEY_MODEL = "deepseek_model"
         const val KEY_PROMPT = "ai_custom_instructions"
+        const val KEY_NAME = "user_name"
+        const val DEFAULT_NAME = "Kumar"
     }
 }

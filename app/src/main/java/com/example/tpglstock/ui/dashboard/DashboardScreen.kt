@@ -1,18 +1,14 @@
 package com.example.tpglstock.ui.dashboard
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,17 +18,13 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.CloudDone
-import androidx.compose.material.icons.rounded.CloudOff
-import androidx.compose.material.icons.rounded.CloudSync
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -44,380 +36,296 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.tpglstock.data.StockStatus
-import com.example.tpglstock.data.SyncStatus
+import com.example.tpglstock.data.dayLabel
 import com.example.tpglstock.data.formatDate
-import com.example.tpglstock.data.formatTime
 import com.example.tpglstock.data.grouped
+import com.example.tpglstock.data.kind
+import com.example.tpglstock.data.levelFraction
+import com.example.tpglstock.data.local.ProductEntity
 import com.example.tpglstock.data.quantityText
+import com.example.tpglstock.data.shortTitle
 import com.example.tpglstock.data.status
-import com.example.tpglstock.data.subtitle
-import com.example.tpglstock.data.title
 import com.example.tpglstock.ui.appViewModel
-import com.example.tpglstock.ui.components.AppCard
-import com.example.tpglstock.ui.components.ProductRow
-import com.example.tpglstock.ui.components.SectionHeader
-import com.example.tpglstock.ui.components.ThinDivider
-import com.example.tpglstock.ui.components.statusColor
+import com.example.tpglstock.ui.components.InkButton
+import com.example.tpglstock.ui.components.LevelBar
+import com.example.tpglstock.ui.components.ListPanel
+import com.example.tpglstock.ui.components.LocalToast
+import com.example.tpglstock.ui.components.Panel
+import com.example.tpglstock.ui.components.ProductLine
+import com.example.tpglstock.ui.components.SectionTitle
+import com.example.tpglstock.ui.components.StatusChip
+import com.example.tpglstock.ui.components.Swatch
+import com.example.tpglstock.ui.components.SyncPill
+import com.example.tpglstock.ui.components.statusTone
+import com.example.tpglstock.ui.theme.DisplayFamily
 import com.example.tpglstock.ui.theme.StockTheme
+import com.example.tpglstock.ui.theme.mono
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
-/**
- * Key numbers only: raw material and popular product levels, this week's movement, stock health and what needs
- * reordering. Full lists live in the Inventory and History tabs.
- */
+/** Home: what needs restocking, raw materials, this week's movement and the busiest products. */
 @Composable
 fun DashboardScreen(
-    onOpenSettings: () -> Unit,
-    onOpenInventory: (String) -> Unit,
+    onOpenYou: () -> Unit,
+    onSeeAttention: () -> Unit,
     onOpenProduct: (Long) -> Unit,
+    onRestock: (Long) -> Unit,
 ) {
-    val vm = appViewModel { c, _ -> DashboardViewModel(c.repository) }
+    val vm = appViewModel { c, _ -> DashboardViewModel(c.repository, c.settings) }
     val state by vm.state.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
-    val snackbar = remember { SnackbarHostState() }
+    val toast = LocalToast.current
     val scope = rememberCoroutineScope()
 
     PullToRefreshBox(
         isRefreshing = refreshing,
-        onRefresh = { scope.launch { vm.pullToRefresh()?.let { snackbar.showSnackbar(it) } } },
+        onRefresh = { scope.launch { vm.pullToRefresh()?.let { toast.show(it, error = true) } } },
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars),
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(top = 8.dp, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
-            item { Header(state, onOpenSettings) }
-            item { HeroCard(state, onOpenProduct) }
-            item { StatusStrip(state, onOpenInventory) }
-
-            val attention = state.out + state.low
-            if (attention.isNotEmpty()) {
+            val pad = Modifier.padding(horizontal = 20.dp)
+            item { Header(state, onOpenYou, pad) }
+            item { Greeting(state, pad) }
+            if (state.attention.isNotEmpty()) {
+                item { NeedsYou(state.attention, onSeeAttention, onOpenProduct, onRestock) }
+            }
+            item { RawMaterials(state, onOpenProduct, pad) }
+            item { WeekCard(state.week, pad) }
+            if (state.movers.isNotEmpty()) {
                 item {
-                    SectionHeader(
-                        "Needs attention",
-                        action = if (attention.size > ATTENTION_ROWS) "See all ${attention.size}" else null,
-                        onAction = { onOpenInventory("attention") },
-                    )
-                }
-                item {
-                    AppCard {
-                        Column {
-                            val rows = attention.take(ATTENTION_ROWS)
-                            rows.forEachIndexed { i, p ->
-                                ProductRow(p, onClick = { onOpenProduct(p.id) })
-                                if (i < rows.lastIndex) ThinDivider()
-                            }
-                        }
-                    }
-                }
-            }
-
-            item { SectionHeader("Last 7 days") }
-            item { WeekChart(state.week) }
-        }
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
-    }
-}
-
-private const val ATTENTION_ROWS = 5
-
-@Composable
-private fun Header(state: DashboardState, onOpenSettings: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text("TrendyPackaging Ghana", style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    when {
-                        state.loading -> "Loading…"
-                        else -> state.lastUpdate?.let { "Data up to ${lastUpdatedText(it)}" } ?: "No updates yet"
-                    },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                Spacer(Modifier.width(8.dp))
-                SyncBadge(state.sync)
-            }
-        }
-        IconButton(onClick = onOpenSettings) {
-            Icon(Icons.Rounded.Settings, contentDescription = "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-/** Shows whether every write reached Supabase and the local copy matches it. */
-@Composable
-private fun SyncBadge(sync: SyncStatus) {
-    val (label, color) = when {
-        sync.error != null -> "Not synced" to StockTheme.colors.critical
-        sync.saving > 0 -> "Saving…" to StockTheme.colors.warn
-        !sync.loaded -> "Syncing…" to StockTheme.colors.warn
-        else -> "Synced" to StockTheme.colors.good
-    }
-    val description = when {
-        sync.error != null -> "Not synced: ${sync.error}. Pull down to retry."
-        sync.inSync -> "All changes saved to the database and up to date."
-        else -> label
-    }
-    Row(
-        Modifier
-            .clip(CircleShape)
-            .background(color.copy(alpha = 0.12f))
-            .semantics(mergeDescendants = true) { contentDescription = description }
-            .padding(horizontal = 8.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            when {
-                sync.error != null -> Icons.Rounded.CloudOff
-                sync.inSync -> Icons.Rounded.CloudDone
-                else -> Icons.Rounded.CloudSync
-            },
-            contentDescription = null,
-            tint = color,
-            modifier = Modifier.size(14.dp),
-        )
-        Spacer(Modifier.width(4.dp))
-        Text(label, style = MaterialTheme.typography.labelMedium, color = color, maxLines = 1)
-    }
-}
-
-private fun lastUpdatedText(ts: Long): String {
-    val today = Calendar.getInstance()
-    val then = Calendar.getInstance().apply { timeInMillis = ts }
-    val sameDay = today.get(Calendar.YEAR) == then.get(Calendar.YEAR) &&
-        today.get(Calendar.DAY_OF_YEAR) == then.get(Calendar.DAY_OF_YEAR)
-    return if (sameDay) "today" else formatDate(ts, "EEE d MMM")
-}
-
-/** Stock levels that matter most: raw materials, then the most frequently updated products. */
-@Composable
-private fun HeroCard(state: DashboardState, onOpenProduct: (Long) -> Unit) {
-    val dim = Color.White.copy(alpha = 0.7f)
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(MaterialTheme.shapes.large)
-            .background(Brush.linearGradient(listOf(StockTheme.colors.heroStart, StockTheme.colors.heroEnd)))
-            .padding(vertical = 16.dp),
-    ) {
-        Text("Raw materials", color = dim, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 20.dp))
-        Spacer(Modifier.height(4.dp))
-        when {
-            state.loading -> HeroPlaceholder()
-            state.rawMaterials.isEmpty() -> HeroEmpty("No raw materials recorded")
-            else -> Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
-                state.rawMaterials.forEach { p ->
-                    Column(
-                        Modifier
-                            .weight(1f)
-                            .clip(MaterialTheme.shapes.medium)
-                            .clickable { onOpenProduct(p.id) }
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                    ) {
-                        Text(p.quantityText(), color = Color.White, style = MaterialTheme.typography.headlineSmall, maxLines = 1)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (p.status != StockStatus.OK) {
-                                Box(Modifier.size(8.dp).clip(CircleShape).background(statusColor(p.status)))
-                                Spacer(Modifier.width(6.dp))
-                            }
-                            Text(p.title, color = dim, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
+                    Column(pad, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        SectionTitle("Moving fast")
+                        ListPanel(state.movers) { m -> ProductLine(m.product, onClick = { onOpenProduct(m.product.id) }, detail = m.detail) }
                     }
                 }
             }
         }
-
-        Spacer(Modifier.height(12.dp))
-        Box(Modifier.padding(horizontal = 20.dp).fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.15f)))
-        Spacer(Modifier.height(12.dp))
-
-        Text("Popular products", color = dim, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 20.dp))
-        Spacer(Modifier.height(4.dp))
-        when {
-            state.loading -> HeroPlaceholder()
-            state.popular.isEmpty() -> HeroEmpty("No stock updates yet")
-            else -> state.popular.forEach { p ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { onOpenProduct(p.id) }
-                        .padding(horizontal = 20.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(p.title, color = Color.White, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        if (p.subtitle.isNotBlank()) {
-                            Text(p.subtitle, color = dim, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    if (p.status != StockStatus.OK) {
-                        Box(Modifier.size(8.dp).clip(CircleShape).background(statusColor(p.status)))
-                        Spacer(Modifier.width(6.dp))
-                    }
-                    Text(p.quantityText(), color = Color.White, style = MaterialTheme.typography.titleMedium)
-                }
-            }
-        }
     }
 }
 
 @Composable
-private fun HeroPlaceholder() {
-    Text("—", color = Color.White, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(horizontal = 20.dp))
-}
-
-@Composable
-private fun HeroEmpty(text: String) {
-    Text(text, color = Color.White.copy(alpha = 0.8f), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
-}
-
-/** Product count per stock status in one card. Each part opens the filtered inventory. */
-@Composable
-private fun StatusStrip(state: DashboardState, onOpenInventory: (String) -> Unit) {
-    AppCard {
-        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-            val count = { n: Int -> if (state.loading) null else n }
-            StatusCell("In stock", count(state.inStock), StockTheme.colors.good, Modifier.weight(1f)) { onOpenInventory("ok") }
-            CellDivider()
-            StatusCell("Low", count(state.low.size), StockTheme.colors.warn, Modifier.weight(1f)) { onOpenInventory("low") }
-            CellDivider()
-            StatusCell("Out", count(state.out.size), StockTheme.colors.critical, Modifier.weight(1f)) { onOpenInventory("out") }
-        }
-    }
-}
-
-@Composable
-private fun StatusCell(label: String, count: Int?, color: Color, modifier: Modifier, onClick: () -> Unit) {
-    Column(
-        modifier
-            .clickable(onClick = onClick)
-            .semantics(mergeDescendants = true) { contentDescription = if (count == null) "$label: loading" else "$count products $label" }
-            .padding(vertical = 14.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(count?.grouped() ?: "—", style = MaterialTheme.typography.headlineSmall)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(8.dp).clip(CircleShape).background(color))
-            Spacer(Modifier.width(6.dp))
-            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable
-private fun CellDivider() {
+fun Avatar(name: String, size: Int, onClick: (() -> Unit)? = null) {
+    val c = StockTheme.colors
     Box(
         Modifier
-            .padding(vertical = 14.dp)
-            .width(1.dp)
-            .fillMaxHeight()
-            .background(MaterialTheme.colorScheme.outlineVariant),
-    )
+            .size(size.dp)
+            .clip(CircleShape)
+            .background(c.accent)
+            .then(if (onClick != null) Modifier.clickable(onClickLabel = "Open profile", onClick = onClick) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            initials(name),
+            color = c.onAccent,
+            style = MaterialTheme.typography.titleMedium.copy(fontFamily = DisplayFamily, fontWeight = FontWeight.Bold, fontSize = (size * 0.4f).sp),
+        )
+    }
 }
 
-/** Increases above the baseline, decreases below it, per day. Tap a day for its figures. */
+fun initials(name: String): String =
+    name.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.take(2).joinToString("") { it.first().uppercase() }.ifEmpty { "TP" }
+
 @Composable
-private fun WeekChart(week: List<DayActivity>) {
-    var selected by remember(week) { mutableIntStateOf(week.indexOfLast { it.updates > 0 }.takeIf { it >= 0 } ?: week.lastIndex) }
-    val inColor = StockTheme.colors.seriesIn
-    val outColor = StockTheme.colors.seriesOut
-    val axis = MaterialTheme.colorScheme.outlineVariant
-    val highlight = MaterialTheme.colorScheme.surfaceContainerHigh
+private fun Header(state: DashboardState, onOpenYou: () -> Unit, modifier: Modifier) {
+    val c = StockTheme.colors
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Avatar(state.name, 40, onOpenYou)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text("TrendyPackaging Ghana", style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp), maxLines = 1)
+            Text(
+                when {
+                    state.loading -> "Loading…"
+                    else -> state.lastUpdate?.let { "Last updated ${lastUpdatedText(it)}" } ?: "No updates yet"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = c.muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        SyncPill(state.sync)
+    }
+}
 
-    AppCard {
-        Column(Modifier.padding(16.dp)) {
-            if (week.isEmpty()) return@Column
-            val day = week[selected.coerceIn(week.indices)]
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(formatDate(day.dayStart, "EEEE d MMM"), style = MaterialTheme.typography.labelLarge)
-                    Text(
-                        if (day.updates == 0) "No updates" else "${day.updates} update${if (day.updates == 1) "" else "s"}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text("+${day.increase.grouped()} pcs", style = MaterialTheme.typography.labelLarge)
-                    Text("−${day.decrease.grouped()} pcs", style = MaterialTheme.typography.labelLarge)
-                }
-            }
-            Spacer(Modifier.height(12.dp))
+/** The data date of the newest movement; the time is left out because imported updates are dated by day. */
+private fun lastUpdatedText(ts: Long): String = when (val d = dayLabel(ts)) {
+    "Today", "Yesterday" -> d.lowercase()
+    else -> formatDate(ts, "EEE d MMM")
+}
 
-            val maxValue = week.maxOf { maxOf(it.increase, it.decrease) }.coerceAtLeast(1)
-            Canvas(
-                Modifier
-                    .fillMaxWidth()
-                    .height(140.dp)
-                    .pointerInput(week) {
-                        detectTapGestures { pos ->
-                            val slot = size.width / week.size
-                            selected = (pos.x / slot).toInt().coerceIn(week.indices)
-                        }
-                    },
-            ) {
-                val slot = size.width / week.size
-                val barW = (slot * 0.42f).coerceAtMost(28.dp.toPx())
-                val mid = size.height / 2f
-                val half = mid - 4.dp.toPx()
-                val r = CornerRadius(4.dp.toPx())
-                week.forEachIndexed { i, d ->
-                    val x = slot * i + (slot - barW) / 2f
-                    if (i == selected) {
-                        drawRoundRect(highlight, topLeft = Offset(slot * i + 2.dp.toPx(), 0f), size = Size(slot - 4.dp.toPx(), size.height), cornerRadius = CornerRadius(10.dp.toPx()))
-                    }
-                    val up = half * d.increase / maxValue
-                    val down = half * d.decrease / maxValue
-                    if (up > 0) drawRoundRect(inColor, topLeft = Offset(x, mid - 1.dp.toPx() - up), size = Size(barW, up), cornerRadius = r)
-                    if (down > 0) drawRoundRect(outColor, topLeft = Offset(x, mid + 1.dp.toPx()), size = Size(barW, down), cornerRadius = r)
-                }
-                drawLine(axis, Offset(0f, mid), Offset(size.width, mid), strokeWidth = 1.dp.toPx())
-            }
-            Row(Modifier.fillMaxWidth()) {
-                week.forEachIndexed { i, d ->
-                    Text(
-                        formatDate(d.dayStart, "EEE"),
-                        modifier = Modifier.weight(1f).clickable { selected = i }.padding(top = 6.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (i == selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    )
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                LegendItem(inColor, "Stock increases")
-                LegendItem(outColor, "Stock decreases")
-            }
+@Composable
+private fun Greeting(state: DashboardState, modifier: Modifier) {
+    val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+    val hello = when {
+        hour < 12 -> "Good morning"
+        hour < 17 -> "Good afternoon"
+        else -> "Good evening"
+    }
+    val n = state.attention.size
+    val line = when {
+        state.loading -> "Loading stock…"
+        n == 0 -> "Everything is in stock. Nice work."
+        else -> buildString {
+            append("$n product${if (n == 1) " needs" else "s need"} you")
+            if (state.outCount > 0) append(" — ${state.outCount} ${if (state.outCount == 1) "is" else "are"} out")
+            append(". ${state.todayUpdates} update${if (state.todayUpdates == 1) "" else "s"} today.")
+        }
+    }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("$hello, ${state.name.ifBlank { "there" }}.", style = MaterialTheme.typography.displaySmall)
+        Text(line, style = MaterialTheme.typography.bodyLarge, color = StockTheme.colors.muted)
+    }
+}
+
+@Composable
+private fun NeedsYou(products: List<ProductEntity>, onSeeAll: () -> Unit, onOpen: (Long) -> Unit, onRestock: (Long) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionTitle("Needs you", Modifier.padding(horizontal = 20.dp), action = "See all", onAction = onSeeAll)
+        LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(products, key = { it.id }) { p -> AttentionCard(p, { onOpen(p.id) }, { onRestock(p.id) }) }
         }
     }
 }
 
 @Composable
-private fun LegendItem(color: Color, label: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(10.dp).clip(CircleShape).background(color))
-        Spacer(Modifier.width(6.dp))
-        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun AttentionCard(p: ProductEntity, onOpen: () -> Unit, onRestock: () -> Unit) {
+    val c = StockTheme.colors
+    Column(
+        Modifier
+            .width(168.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(c.surface)
+            .clickable(onClick = onOpen)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Swatch(p, 28.dp)
+            Spacer(Modifier.weight(1f))
+            StatusChip(p.status)
+        }
+        Column {
+            Text(p.shortTitle, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(p.kind.ifBlank { " " }, style = MaterialTheme.typography.bodySmall, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Text(p.quantityText(), style = mono(20.sp), maxLines = 1)
+        InkButton("Restock", onRestock, Modifier.fillMaxWidth(), height = 36.dp, shape = RoundedCornerShape(12.dp), icon = Icons.Rounded.Add)
+    }
+}
+
+@Composable
+private fun RawMaterials(state: DashboardState, onOpen: (Long) -> Unit, modifier: Modifier) {
+    val c = StockTheme.colors
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(c.hero)
+            .padding(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Raw materials", style = MaterialTheme.typography.titleMedium, color = c.onHero, modifier = Modifier.weight(1f))
+            Text("bags on hand", style = MaterialTheme.typography.bodySmall, color = c.heroMuted)
+        }
+        when {
+            state.loading -> Text("—", style = mono(30.sp), color = c.onHero)
+            state.rawMaterials.isEmpty() -> Text("No raw materials recorded", style = MaterialTheme.typography.bodyMedium, color = c.heroMuted)
+            else -> state.rawMaterials.chunked(3).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    row.forEach { p ->
+                        Column(
+                            Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onOpen(p.id) }
+                                .semantics(mergeDescendants = true) { contentDescription = "${p.shortTitle}: ${p.quantityText()}" },
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(p.quantity.grouped(), style = mono(30.sp).copy(lineHeight = 30.sp), color = c.onHero, maxLines = 1)
+                            LevelBar(p.levelFraction, statusTone(p.status).onHero, track = c.heroTrack)
+                            Text(p.shortTitle, style = MaterialTheme.typography.bodySmall.copy(lineHeight = 15.sp), color = c.heroMuted, maxLines = 2)
+                        }
+                    }
+                    repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+        }
+    }
+}
+
+/** Increases above the line, decreases below it, per day. Tap a day for its figures. */
+@Composable
+private fun WeekCard(week: List<DayActivity>, modifier: Modifier) {
+    if (week.isEmpty()) return
+    val c = StockTheme.colors
+    var selected by remember(week) { mutableIntStateOf(week.indexOfLast { it.updates > 0 }.takeIf { it >= 0 } ?: week.lastIndex) }
+    val day = week[selected.coerceIn(week.indices)]
+    val max = week.maxOf { maxOf(it.increase, it.decrease) }.coerceAtLeast(1)
+
+    Panel(modifier, shape = RoundedCornerShape(24.dp), padding = PaddingValues(18.dp)) {
+        Row(verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f)) {
+                Text(dayLabel(day.dayStart), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (day.updates == 0) "No updates" else "${day.updates} update${if (day.updates == 1) "" else "s"}",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    color = c.muted,
+                )
+            }
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("+${day.increase.grouped()} pcs", style = mono(13.sp, FontWeight.Normal), color = c.inFg)
+                Text("−${day.decrease.grouped()} pcs", style = mono(13.sp, FontWeight.Normal), color = c.outFg)
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            week.forEachIndexed { i, d ->
+                val on = i == selected
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (on) c.paper else Color.Transparent)
+                        .clickable { selected = i }
+                        .semantics(mergeDescendants = true) {
+                            contentDescription = "${dayLabel(d.dayStart)}: plus ${d.increase} pieces, minus ${d.decrease} pieces"
+                        }
+                        .padding(vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Box(Modifier.height(56.dp).fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
+                        val h = 54f * d.increase / max
+                        if (h > 0) Box(Modifier.width(14.dp).height(h.dp.coerceAtLeast(2.dp)).clip(RoundedCornerShape(4.dp, 4.dp, 1.dp, 1.dp)).background(c.chartUp))
+                    }
+                    Box(Modifier.padding(vertical = 2.dp).height(1.dp).fillMaxWidth().background(c.border))
+                    Box(Modifier.height(40.dp).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                        val h = 38f * d.decrease / max
+                        if (h > 0) Box(Modifier.width(14.dp).height(h.dp.coerceAtLeast(2.dp)).clip(RoundedCornerShape(1.dp, 1.dp, 4.dp, 4.dp)).background(c.chartDown))
+                    }
+                    Text(
+                        if (i == week.lastIndex) "Today" else formatDate(d.dayStart, "EEE"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (on) c.ink else c.faint,
+                        modifier = Modifier.padding(top = 6.dp),
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
     }
 }
