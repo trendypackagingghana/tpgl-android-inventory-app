@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "TPGL" wordmark drawn as strokes, centred in the 66dp adaptive-icon safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.95"
+        android:scaleY="0.95">
+        <!-- T -->
+        <path
+            android:pathData="M24.5,46.8H36.5M30.5,46.8V63"
+            android:strokeWidth="3.6"
+            android:strokeColor="#FFFFFF" />
+        <!-- P -->
+        <path
+            android:pathData="M41.3,63V46.8H45.5A4.2,4.2 0,0 1,45.5 55.2H41.3"
+            android:strokeWidth="3.6"
+            android:strokeColor="#FFFFFF" />
+        <!-- G -->
+        <path
+            android:pathData="M68.02,49.37A7.2,7.2 0,1 0,69.7 54H63"
+            android:strokeWidth="3.6"
+            android:strokeColor="#FFFFFF" />
+        <!-- L -->
+        <path
+            android:pathData="M76.3,45V61.2H83.5"
+            android:strokeWidth="3.6"
+            android:strokeColor="#FFFFFF" />
+    </group>
+</vector>
