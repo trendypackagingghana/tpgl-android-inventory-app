@@ -55,21 +55,27 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.tpglstock.data.StockStatus
 import com.example.tpglstock.data.SyncStatus
 import com.example.tpglstock.data.formatDate
 import com.example.tpglstock.data.formatTime
 import com.example.tpglstock.data.grouped
+import com.example.tpglstock.data.quantityText
+import com.example.tpglstock.data.status
+import com.example.tpglstock.data.subtitle
+import com.example.tpglstock.data.title
 import com.example.tpglstock.ui.appViewModel
 import com.example.tpglstock.ui.components.AppCard
 import com.example.tpglstock.ui.components.ProductRow
 import com.example.tpglstock.ui.components.SectionHeader
 import com.example.tpglstock.ui.components.ThinDivider
+import com.example.tpglstock.ui.components.statusColor
 import com.example.tpglstock.ui.theme.StockTheme
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
 /**
- * Key numbers only: stock on hand, this week's movement, stock health and what needs
+ * Key numbers only: raw material and popular product levels, this week's movement, stock health and what needs
  * reordering. Full lists live in the Inventory and History tabs.
  */
 @Composable
@@ -95,7 +101,7 @@ fun DashboardScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { Header(state, onOpenSettings) }
-            item { HeroCard(state) }
+            item { HeroCard(state, onOpenProduct) }
             item { StatusStrip(state, onOpenInventory) }
 
             val attention = state.out + state.low
@@ -139,7 +145,7 @@ private fun Header(state: DashboardState, onOpenSettings: () -> Unit) {
                 Text(
                     when {
                         state.loading -> "Loading…"
-                        else -> state.lastUpdate?.let { "Updated ${lastUpdatedText(it)}" } ?: "No updates yet"
+                        else -> state.lastUpdate?.let { "Data up to ${lastUpdatedText(it)}" } ?: "No updates yet"
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -199,46 +205,90 @@ private fun lastUpdatedText(ts: Long): String {
     val then = Calendar.getInstance().apply { timeInMillis = ts }
     val sameDay = today.get(Calendar.YEAR) == then.get(Calendar.YEAR) &&
         today.get(Calendar.DAY_OF_YEAR) == then.get(Calendar.DAY_OF_YEAR)
-    return if (sameDay) "today, ${formatTime(ts)}" else formatDate(ts, "EEE d MMM, HH:mm")
+    return if (sameDay) "today" else formatDate(ts, "EEE d MMM")
 }
 
-/** Stock on hand, plus this week's pieces in and out. */
+/** Stock levels that matter most: raw materials, then the most frequently updated products. */
 @Composable
-private fun HeroCard(state: DashboardState) {
-    val weekIn = state.week.sumOf { it.increase }
-    val weekOut = state.week.sumOf { it.decrease }
-    Box(
+private fun HeroCard(state: DashboardState, onOpenProduct: (Long) -> Unit) {
+    val dim = Color.White.copy(alpha = 0.7f)
+    Column(
         Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.large)
             .background(Brush.linearGradient(listOf(StockTheme.colors.heroStart, StockTheme.colors.heroEnd)))
-            .padding(20.dp),
+            .padding(vertical = 16.dp),
     ) {
-        Column {
-            Text("Pieces on hand", color = Color.White.copy(alpha = 0.8f), style = MaterialTheme.typography.labelLarge)
-            Text(if (state.loading) "—" else state.totalPieces.grouped(), color = Color.White, style = MaterialTheme.typography.displaySmall)
-            Text(
-                if (state.loading) " " else "${state.productCount.grouped()} products · ${state.rawMaterialBags.grouped()} bags raw material",
-                color = Color.White.copy(alpha = 0.8f),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Spacer(Modifier.height(16.dp))
-            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.15f)))
-            Spacer(Modifier.height(12.dp))
-            Row {
-                HeroStat("In · 7 days", if (state.loading) "—" else "+${weekIn.grouped()}", Modifier.weight(1f))
-                HeroStat("Out · 7 days", if (state.loading) "—" else "−${weekOut.grouped()}", Modifier.weight(1f))
+        Text("Raw materials", color = dim, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 20.dp))
+        Spacer(Modifier.height(4.dp))
+        when {
+            state.loading -> HeroPlaceholder()
+            state.rawMaterials.isEmpty() -> HeroEmpty("No raw materials recorded")
+            else -> Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                state.rawMaterials.forEach { p ->
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .clip(MaterialTheme.shapes.medium)
+                            .clickable { onOpenProduct(p.id) }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    ) {
+                        Text(p.quantityText(), color = Color.White, style = MaterialTheme.typography.headlineSmall, maxLines = 1)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (p.status != StockStatus.OK) {
+                                Box(Modifier.size(8.dp).clip(CircleShape).background(statusColor(p.status)))
+                                Spacer(Modifier.width(6.dp))
+                            }
+                            Text(p.title, color = dim, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Box(Modifier.padding(horizontal = 20.dp).fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.15f)))
+        Spacer(Modifier.height(12.dp))
+
+        Text("Popular products", color = dim, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 20.dp))
+        Spacer(Modifier.height(4.dp))
+        when {
+            state.loading -> HeroPlaceholder()
+            state.popular.isEmpty() -> HeroEmpty("No stock updates yet")
+            else -> state.popular.forEach { p ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenProduct(p.id) }
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(p.title, color = Color.White, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (p.subtitle.isNotBlank()) {
+                            Text(p.subtitle, color = dim, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    if (p.status != StockStatus.OK) {
+                        Box(Modifier.size(8.dp).clip(CircleShape).background(statusColor(p.status)))
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    Text(p.quantityText(), color = Color.White, style = MaterialTheme.typography.titleMedium)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun HeroStat(label: String, value: String, modifier: Modifier) {
-    Column(modifier) {
-        Text(label, color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.labelMedium)
-        Text(value, color = Color.White, style = MaterialTheme.typography.titleMedium)
-    }
+private fun HeroPlaceholder() {
+    Text("—", color = Color.White, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(horizontal = 20.dp))
+}
+
+@Composable
+private fun HeroEmpty(text: String) {
+    Text(text, color = Color.White.copy(alpha = 0.8f), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
 }
 
 /** Product count per stock status in one card. Each part opens the filtered inventory. */

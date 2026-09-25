@@ -22,13 +22,15 @@ data class DayActivity(val dayStart: Long, val increase: Long, val decrease: Lon
 
 data class DashboardState(
     val loading: Boolean = true,
-    val totalPieces: Long = 0,
-    val rawMaterialBags: Long = 0,
-    val productCount: Int = 0,
+    /** Bag-counted raw materials (blow and injection material), largest first. */
+    val rawMaterials: List<ProductEntity> = emptyList(),
+    /** Piece-counted products with the most stock updates recently. */
+    val popular: List<ProductEntity> = emptyList(),
     val inStock: Int = 0,
     val low: List<ProductEntity> = emptyList(),
     val out: List<ProductEntity> = emptyList(),
     val week: List<DayActivity> = emptyList(),
+    /** When the newest recorded movement happened (its data date), not when it was uploaded. */
     val lastUpdate: Long? = null,
     val sync: SyncStatus = SyncStatus(),
 )
@@ -39,20 +41,19 @@ class DashboardViewModel(private val repo: StockRepository) : ViewModel() {
 
     val state: StateFlow<DashboardState> = combine(
         repo.products,
-        repo.movementsSince(weekStart),
+        repo.movements,
         repo.status,
-    ) { products, week, status ->
-        val pcsProducts = products.filter { it.unit == StockUnit.PCS }
+    ) { products, movements, status ->
+        val week = movements.filter { it.timestamp >= weekStart }
         DashboardState(
             loading = !status.loaded,
-            totalPieces = pcsProducts.sumOf { it.quantity },
-            rawMaterialBags = products.filter { it.unit == StockUnit.BAGS }.sumOf { it.quantity },
-            productCount = products.size,
+            rawMaterials = products.filter { it.unit == StockUnit.BAGS }.sortedByDescending { it.quantity },
+            popular = popular(products, movements),
             inStock = products.count { it.status == StockStatus.OK },
             low = products.filter { it.status == StockStatus.LOW }.sortedBy { it.quantity },
             out = products.filter { it.status == StockStatus.OUT },
             week = buildWeek(week),
-            lastUpdate = products.maxOfOrNull { it.updatedAt },
+            lastUpdate = movements.maxOfOrNull { it.timestamp },
             sync = status,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DashboardState())
@@ -78,6 +79,21 @@ class DashboardViewModel(private val repo: StockRepository) : ViewModel() {
         }
     }
 
+    /**
+     * Ranks piece-counted products by how often they were updated in the last
+     * [POPULAR_WINDOW], then all time. Products never updated are left out.
+     */
+    private fun popular(products: List<ProductEntity>, movements: List<MovementEntity>): List<ProductEntity> {
+        val tracked = movements.filter { it.type != MovementType.OPENING && it.unit == StockUnit.PCS }
+        val since = System.currentTimeMillis() - POPULAR_WINDOW
+        val recent = tracked.filter { it.timestamp >= since }.groupingBy { it.productId }.eachCount()
+        val allTime = tracked.groupingBy { it.productId }.eachCount()
+        return products
+            .filter { it.unit == StockUnit.PCS && it.id in allTime }
+            .sortedWith(compareByDescending<ProductEntity> { recent[it.id] ?: 0 }.thenByDescending { allTime[it.id] ?: 0 })
+            .take(POPULAR_COUNT)
+    }
+
     private fun buildWeek(movements: List<MovementEntity>): List<DayActivity> {
         val tracked = movements.filter { it.type != MovementType.OPENING && it.unit == StockUnit.PCS }
         return (0 until 7).map { i ->
@@ -95,6 +111,8 @@ class DashboardViewModel(private val repo: StockRepository) : ViewModel() {
     private companion object {
         const val DAY = 24 * 60 * 60 * 1000L
         const val PULL_INTERVAL = 60_000L
+        const val POPULAR_WINDOW = 30 * DAY
+        const val POPULAR_COUNT = 5
 
         fun startOfDay(ts: Long): Long = Calendar.getInstance().run {
             timeInMillis = ts
