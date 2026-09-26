@@ -10,8 +10,10 @@ data class AiSettings(
     /** Optional in-app override. Empty means use the key built in from secrets.properties. */
     val apiKey: String = "",
     val model: String = DEFAULT_MODEL,
-    val customInstructions: String = DEFAULT_INSTRUCTIONS,
 ) {
+    /** Built into the app; not editable on the phone. */
+    val customInstructions: String get() = DEFAULT_INSTRUCTIONS
+
     val effectiveApiKey: String get() = apiKey.ifBlank { BuildConfig.DEEPSEEK_API_KEY }
     val isConfigured: Boolean get() = effectiveApiKey.isNotBlank()
     val usesBuiltInKey: Boolean get() = apiKey.isBlank() && BuildConfig.DEEPSEEK_API_KEY.isNotBlank()
@@ -32,14 +34,6 @@ data class AiSettings(
             - "Beach" is a colour name we use; don't correct it to "Bleach".
             - Blow material and injection material are raw materials counted in bags.
         """.trimIndent()
-
-        /** Earlier default, replaced automatically if the owner never edited it. */
-        val PREVIOUS_DEFAULT_INSTRUCTIONS = """
-            - Our WhatsApp reports list stock under category headings, e.g. "SPRAY BOTTLES" then "(500ml) Clear = 8 bags (1,600 pcs)". Treat a dated full report as a stock count.
-            - "Beach" is a colour name we use; don't correct it to "Bleach".
-            - "Bottles cover red" means Bottle Covers, colour Red.
-            - Blow material and injection material are raw materials counted in bags.
-        """.trimIndent()
     }
 }
 
@@ -51,9 +45,6 @@ class SettingsStore(context: Context) {
         AiSettings(
             apiKey = prefs.getString(KEY_API, "").orEmpty(),
             model = prefs.getString(KEY_MODEL, null)?.takeIf { it.startsWith("deepseek") } ?: AiSettings.DEFAULT_MODEL,
-            customInstructions = prefs.getString(KEY_PROMPT, null)
-                ?.takeUnless { it == AiSettings.PREVIOUS_DEFAULT_INSTRUCTIONS }
-                ?: AiSettings.DEFAULT_INSTRUCTIONS,
         ),
     )
     val ai: StateFlow<AiSettings> = _ai.asStateFlow()
@@ -71,7 +62,7 @@ class SettingsStore(context: Context) {
         prefs.edit()
             .putString(KEY_API, settings.apiKey.trim())
             .putString(KEY_MODEL, settings.model.trim().ifBlank { AiSettings.DEFAULT_MODEL })
-            .putString(KEY_PROMPT, settings.customInstructions)
+            .remove(KEY_PROMPT)
             .apply()
         _ai.value = settings.copy(
             apiKey = settings.apiKey.trim(),

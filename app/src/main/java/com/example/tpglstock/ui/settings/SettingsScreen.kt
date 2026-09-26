@@ -84,7 +84,6 @@ fun SettingsScreen() {
     val current = store.ai.value
     var apiKey by rememberSaveable { mutableStateOf(current.apiKey) }
     var model by rememberSaveable { mutableStateOf(current.model) }
-    var prompt by rememberSaveable { mutableStateOf(current.customInstructions) }
     val toast = LocalToast.current
     val c = StockTheme.colors
 
@@ -131,12 +130,11 @@ fun SettingsScreen() {
                     )
                 }
                 Text(
-                    "Reads WhatsApp updates and suggests stock changes. Teach it how your team writes.",
+                    "Reads WhatsApp updates and suggests stock changes.",
                     style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
                     color = c.muted,
                 )
                 LabeledField("Model", model, { model = it.trim() }, textStyle = mono(14.sp, androidx.compose.ui.text.font.FontWeight.Normal))
-                LabeledField("House rules", prompt, { prompt = it }, singleLine = false, minLines = 4, textStyle = MaterialTheme.typography.bodyMedium)
                 LabeledField(
                     "DeepSeek API key",
                     apiKey,
@@ -152,12 +150,12 @@ fun SettingsScreen() {
                         style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp),
                         color = c.muted,
                         modifier = Modifier
-                            .clickable { prompt = AiSettings.DEFAULT_INSTRUCTIONS; model = AiSettings.DEFAULT_MODEL }
+                            .clickable { model = AiSettings.DEFAULT_MODEL }
                             .padding(vertical = 8.dp),
                     )
                     Spacer(Modifier.weight(1f))
                     InkButton("Save", onClick = {
-                        store.save(AiSettings(apiKey, model, prompt))
+                        store.save(AiSettings(apiKey, model))
                         toast.show("Assistant settings saved")
                     }, height = 40.dp, shape = RoundedCornerShape(12.dp))
                 }
