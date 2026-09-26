@@ -18,12 +18,11 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -47,25 +46,23 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.tpglstock.data.dayLabel
 import com.example.tpglstock.data.formatDate
 import com.example.tpglstock.data.grouped
-import com.example.tpglstock.data.kind
 import com.example.tpglstock.data.levelFraction
 import com.example.tpglstock.data.local.ProductEntity
 import com.example.tpglstock.data.quantityText
 import com.example.tpglstock.data.shortTitle
 import com.example.tpglstock.data.status
 import com.example.tpglstock.ui.appViewModel
-import com.example.tpglstock.ui.components.InkButton
 import com.example.tpglstock.ui.components.LevelBar
 import com.example.tpglstock.ui.components.ListPanel
 import com.example.tpglstock.ui.components.LocalToast
 import com.example.tpglstock.ui.components.Panel
 import com.example.tpglstock.ui.components.ProductLine
 import com.example.tpglstock.ui.components.SectionTitle
-import com.example.tpglstock.ui.components.StatusChip
-import com.example.tpglstock.ui.components.Swatch
 import com.example.tpglstock.ui.components.SyncPill
 import com.example.tpglstock.ui.components.statusTone
 import com.example.tpglstock.ui.theme.DisplayFamily
+import com.example.tpglstock.data.WeeklySummary
+import com.example.tpglstock.ui.theme.StatusTone
 import com.example.tpglstock.ui.theme.StockTheme
 import com.example.tpglstock.ui.theme.mono
 import kotlinx.coroutines.launch
@@ -75,9 +72,9 @@ import java.util.Calendar
 @Composable
 fun DashboardScreen(
     onOpenYou: () -> Unit,
-    onSeeAttention: () -> Unit,
+    onOpenStock: (filter: String) -> Unit,
     onOpenProduct: (Long) -> Unit,
-    onRestock: (Long) -> Unit,
+    onOpenInsights: () -> Unit,
 ) {
     val vm = appViewModel { c, _ -> DashboardViewModel(c.repository, c.settings) }
     val state by vm.state.collectAsStateWithLifecycle()
@@ -98,9 +95,8 @@ fun DashboardScreen(
             val pad = Modifier.padding(horizontal = 20.dp)
             item { Header(state, onOpenYou, pad) }
             item { Greeting(state, pad) }
-            if (state.attention.isNotEmpty()) {
-                item { NeedsYou(state.attention, onSeeAttention, onOpenProduct, onRestock) }
-            }
+            state.summary?.let { summary -> item { WeeklySummaryCard(summary, onOpenInsights, pad) } }
+            item { StatusCards(state, onOpenStock, pad) }
             item { RawMaterials(state, onOpenProduct, pad) }
             item { WeekCard(state.week, pad) }
             if (state.movers.isNotEmpty()) {
@@ -191,39 +187,86 @@ private fun Greeting(state: DashboardState, modifier: Modifier) {
     }
 }
 
+/** Last week at a glance with the top insight; tap for the full summary. */
 @Composable
-private fun NeedsYou(products: List<ProductEntity>, onSeeAll: () -> Unit, onOpen: (Long) -> Unit, onRestock: (Long) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SectionTitle("Needs you", Modifier.padding(horizontal = 20.dp), action = "See all", onAction = onSeeAll)
-        LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(products, key = { it.id }) { p -> AttentionCard(p, { onOpen(p.id) }, { onRestock(p.id) }) }
+private fun WeeklySummaryCard(summary: WeeklySummary, onOpen: () -> Unit, modifier: Modifier) {
+    val c = StockTheme.colors
+    val t = summary.totals
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(c.surface)
+            .clickable(onClickLabel = "Open weekly summary", onClick = onOpen)
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Last week", style = MaterialTheme.typography.titleMedium)
+                Text(summary.rangeText, style = MaterialTheme.typography.bodySmall, color = c.muted)
+            }
+            Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = c.muted, modifier = Modifier.size(22.dp))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            SummaryFigure("Added", "+${t.added.grouped()}", "pcs", c.inFg, Modifier.weight(1f))
+            SummaryFigure("Went out", "−${t.removed.grouped()}", "pcs", c.outFg, Modifier.weight(1f))
+            SummaryFigure("Material", t.bagsUsed.grouped(), "bags used", c.ink, Modifier.weight(1f))
+        }
+        summary.headline?.let { h ->
+            val (icon, bg, fg) = insightLook(h.tone)
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(bg).padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(10.dp))
+                Text(h.title, style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp), color = fg, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            val more = summary.insights.size - 1
+            if (more > 0) Text("$more more insight${if (more == 1) "" else "s"} · tap to see all", style = MaterialTheme.typography.bodySmall, color = c.muted)
         }
     }
 }
 
 @Composable
-private fun AttentionCard(p: ProductEntity, onOpen: () -> Unit, onRestock: () -> Unit) {
+private fun SummaryFigure(label: String, value: String, unit: String, color: Color, modifier: Modifier) {
+    val c = StockTheme.colors
+    Column(modifier) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = c.muted)
+        Text(value, style = mono(20.sp), color = color, maxLines = 1)
+        Text(unit, style = MaterialTheme.typography.labelSmall, color = c.faint)
+    }
+}
+
+/** Out and low counts; each opens the Stock tab filtered to that status. */
+@Composable
+private fun StatusCards(state: DashboardState, onOpenStock: (String) -> Unit, modifier: Modifier) {
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        StatusCard("Out of stock", state.outCount, StockTheme.colors.out, Modifier.weight(1f)) { onOpenStock("out") }
+        StatusCard("Low stock", state.lowCount, StockTheme.colors.low, Modifier.weight(1f)) { onOpenStock("low") }
+    }
+}
+
+@Composable
+private fun StatusCard(label: String, count: Int, tone: StatusTone, modifier: Modifier, onClick: () -> Unit) {
     val c = StockTheme.colors
     Column(
-        Modifier
-            .width(168.dp)
+        modifier
             .clip(RoundedCornerShape(20.dp))
             .background(c.surface)
-            .clickable(onClick = onOpen)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .clickable(onClickLabel = "Show $label", onClick = onClick)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Swatch(p, 28.dp)
-            Spacer(Modifier.weight(1f))
-            StatusChip(p.status)
+            Box(Modifier.size(10.dp).clip(CircleShape).background(if (count > 0) tone.bar else c.track))
+            Spacer(Modifier.width(8.dp))
+            Text(label, style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp), color = c.muted, modifier = Modifier.weight(1f))
+            Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = c.faint, modifier = Modifier.size(18.dp))
         }
-        Column {
-            Text(p.shortTitle, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(p.kind.ifBlank { " " }, style = MaterialTheme.typography.bodySmall, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        Text(p.quantityText(), style = mono(20.sp), maxLines = 1)
-        InkButton("Restock", onRestock, Modifier.fillMaxWidth(), height = 36.dp, shape = RoundedCornerShape(12.dp), icon = Icons.Rounded.Add)
+        Text(count.toString(), style = mono(34.sp).copy(lineHeight = 34.sp), color = if (count > 0) tone.fg else c.ink)
+        Text(if (count == 1) "product" else "products", style = MaterialTheme.typography.bodySmall, color = c.faint)
     }
 }
 

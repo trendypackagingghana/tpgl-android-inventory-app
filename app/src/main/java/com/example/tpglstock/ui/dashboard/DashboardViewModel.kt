@@ -6,6 +6,8 @@ import com.example.tpglstock.data.SettingsStore
 import com.example.tpglstock.data.StockRepository
 import com.example.tpglstock.data.StockStatus
 import com.example.tpglstock.data.SyncStatus
+import com.example.tpglstock.data.WeeklySummary
+import com.example.tpglstock.data.weeklySummary
 import com.example.tpglstock.data.local.MovementEntity
 import com.example.tpglstock.data.local.MovementType
 import com.example.tpglstock.data.local.ProductEntity
@@ -30,6 +32,9 @@ data class DashboardState(
     /** Out-of-stock products first, then low ones. */
     val attention: List<ProductEntity> = emptyList(),
     val outCount: Int = 0,
+    val lowCount: Int = 0,
+    /** Last full Monday–Sunday week; changes over every Monday. */
+    val summary: WeeklySummary? = null,
     /** Bag-counted raw materials (blow and injection material), largest first. */
     val rawMaterials: List<ProductEntity> = emptyList(),
     val movers: List<Mover> = emptyList(),
@@ -58,6 +63,8 @@ class DashboardViewModel(private val repo: StockRepository, settings: SettingsSt
             name = name,
             attention = out + low,
             outCount = out.size,
+            lowCount = low.size,
+            summary = if (status.loaded) weeklySummary(products, movements) else null,
             rawMaterials = products.filter { it.unit == StockUnit.BAGS }.sortedByDescending { it.quantity },
             movers = movers(products, movements),
             week = buildWeek(movements.filter { it.timestamp >= weekStart }),

@@ -85,6 +85,7 @@ import com.example.tpglstock.ui.inventory.InventoryScreen
 import com.example.tpglstock.ui.product.ProductDetailScreen
 import com.example.tpglstock.ui.product.ProductEditScreen
 import com.example.tpglstock.ui.settings.SettingsScreen
+import com.example.tpglstock.ui.dashboard.InsightsScreen
 import com.example.tpglstock.ui.theme.StockTheme
 import kotlinx.coroutines.delay
 
@@ -97,6 +98,7 @@ object Routes {
     const val PRODUCT_EDIT = "product/edit?id={id}"
     const val LOG = "log?productId={productId}&mode={mode}"
     const val ASSISTANT = "assistant"
+    const val INSIGHTS = "insights"
 
     fun stock(filter: String = "") = "stock?filter=$filter"
     fun product(id: Long) = "product/$id"
@@ -151,10 +153,13 @@ fun AppNavigation(navController: NavHostController = rememberNavController()) {
                     composable(Routes.TODAY) {
                         DashboardScreen(
                             onOpenYou = { goTab(Routes.YOU) },
-                            onSeeAttention = { goTab(Routes.stock("attention"), restore = false) },
+                            onOpenStock = { filter -> goTab(Routes.stock(filter), restore = false) },
                             onOpenProduct = ::openProduct,
-                            onRestock = { log(it, ChangeMode.ADD) },
+                            onOpenInsights = { navController.navigate(Routes.INSIGHTS) },
                         )
+                    }
+                    composable(Routes.INSIGHTS) {
+                        InsightsScreen(onBack = { navController.popBackStack() }, onOpenProduct = ::openProduct)
                     }
                     composable(
                         Routes.STOCK,
