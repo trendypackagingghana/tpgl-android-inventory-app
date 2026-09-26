@@ -179,6 +179,12 @@ fun ProductDetailScreen(onBack: () -> Unit, onEdit: (Long) -> Unit, onLog: (Long
             }
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SectionTitle("Stock trend")
+                    StockChart(p, history)
+                }
+            }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionTitle("History")
                     if (history.isEmpty()) {
                         Panel { Text("No changes recorded yet.", style = MaterialTheme.typography.bodyMedium, color = c.muted, modifier = Modifier.padding(16.dp)) }
