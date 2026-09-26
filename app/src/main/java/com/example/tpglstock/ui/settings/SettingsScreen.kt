@@ -1,5 +1,8 @@
 package com.example.tpglstock.ui.settings
 
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,6 +27,7 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.CloudSync
+import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material.icons.rounded.Storefront
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -31,18 +35,22 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewModelScope
 import com.example.tpglstock.data.AiSettings
 import com.example.tpglstock.data.SettingsStore
@@ -50,6 +58,7 @@ import com.example.tpglstock.data.StockRepository
 import com.example.tpglstock.data.SyncStatus
 import com.example.tpglstock.data.local.MovementType
 import com.example.tpglstock.data.startOfDay
+import com.example.tpglstock.data.writeStockPdf
 import com.example.tpglstock.ui.appViewModel
 import com.example.tpglstock.ui.components.InkButton
 import com.example.tpglstock.ui.components.LabeledField
@@ -59,18 +68,46 @@ import com.example.tpglstock.ui.components.RowDivider
 import com.example.tpglstock.ui.dashboard.Avatar
 import com.example.tpglstock.ui.theme.StockTheme
 import com.example.tpglstock.ui.theme.mono
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
-class YouViewModel(repo: StockRepository, val settings: SettingsStore) : ViewModel() {
+class YouViewModel(private val repo: StockRepository, val settings: SettingsStore) : ViewModel() {
     private val weekStart = startOfDay(System.currentTimeMillis()) - 6 * 24 * 60 * 60 * 1000L
 
     val weekUpdates: StateFlow<Int> = repo.movements
         .map { list -> list.count { it.timestamp >= weekStart && it.type != MovementType.OPENING } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
     val sync: StateFlow<SyncStatus> = repo.status
+
+    /** Refreshes from Supabase, then writes all products to a PDF. */
+    suspend fun stockPdf(context: Context): File {
+        val products = repo.allProducts()
+        return withContext(Dispatchers.IO) { writeStockPdf(context, products) }
+    }
+}
+
+/** Opens WhatsApp (or WhatsApp Business) with the PDF attached; falls back to the share sheet. */
+private fun shareViaWhatsApp(context: Context, file: File) {
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = "application/pdf"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    for (pkg in listOf("com.whatsapp", "com.whatsapp.w4b")) {
+        try {
+            context.startActivity(Intent(send).setPackage(pkg))
+            return
+        } catch (_: ActivityNotFoundException) {
+        }
+    }
+    context.startActivity(Intent.createChooser(send, "Share stock"))
 }
 
 /** Profile, assistant settings and app info. */
@@ -84,6 +121,9 @@ fun SettingsScreen() {
     val current = store.ai.value
     var apiKey by rememberSaveable { mutableStateOf(current.apiKey) }
     var model by rememberSaveable { mutableStateOf(current.model) }
+    var sharing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val toast = LocalToast.current
     val c = StockTheme.colors
 
@@ -113,6 +153,22 @@ fun SettingsScreen() {
                 name,
                 store::saveUserName,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
+            )
+            Spacer(Modifier.size(14.dp))
+            InkButton(
+                if (sharing) "Preparing PDF…" else "Share current stock",
+                onClick = {
+                    sharing = true
+                    scope.launch {
+                        runCatching { vm.stockPdf(context) }
+                            .onSuccess { shareViaWhatsApp(context, it) }
+                            .onFailure { toast.show("Couldn't create the stock PDF", error = true) }
+                        sharing = false
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !sharing,
+                icon = Icons.Rounded.IosShare,
             )
         }
 
