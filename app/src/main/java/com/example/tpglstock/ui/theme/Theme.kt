@@ -1,17 +1,15 @@
 package com.example.tpglstock.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.unit.dp
 
-private fun materialColors(c: TpglColors, dark: Boolean) = (if (dark) darkColorScheme() else lightColorScheme()).copy(
+private fun materialColors(c: TpglColors) = lightColorScheme().copy(
     primary = c.ink,
     onPrimary = c.onInk,
     primaryContainer = c.track,
@@ -49,14 +47,12 @@ private val AppShapes = Shapes(
 )
 
 @Composable
-fun TPGLStockTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    content: @Composable () -> Unit,
-) {
-    val colors = if (darkTheme) DarkTpglColors else LightTpglColors
+/** Always light: the app has no dark theme, regardless of the system setting. */
+fun TPGLStockTheme(content: @Composable () -> Unit) {
+    val colors = LightTpglColors
     CompositionLocalProvider(LocalTpglColors provides colors) {
         MaterialTheme(
-            colorScheme = materialColors(colors, darkTheme),
+            colorScheme = materialColors(colors),
             typography = Typography,
             shapes = AppShapes,
             content = content,
