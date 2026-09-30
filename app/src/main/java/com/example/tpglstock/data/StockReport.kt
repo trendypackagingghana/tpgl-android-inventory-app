@@ -87,6 +87,8 @@ fun writeStockPdf(context: Context, products: List<ProductEntity>, now: Long = S
     doc.finishPage(page)
 
     val dir = File(context.cacheDir, "shared").apply { mkdirs() }
+    // Only the latest report stays on the phone.
+    dir.listFiles()?.forEach { it.delete() }
     val file = File(dir, "TPGL-stock-${formatDate(now, "yyyy-MM-dd")}.pdf")
     file.outputStream().use { doc.writeTo(it) }
     doc.close()

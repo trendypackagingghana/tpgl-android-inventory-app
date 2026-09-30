@@ -41,10 +41,13 @@ import com.example.tpglstock.ui.components.MovementItem
 import com.example.tpglstock.ui.components.PillButton
 import com.example.tpglstock.ui.components.ScreenTitle
 import com.example.tpglstock.ui.components.SearchBox
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 
 enum class HistoryFilter(val label: String) {
@@ -65,10 +68,12 @@ data class HistoryState(
 )
 
 class HistoryViewModel(repo: StockRepository) : ViewModel() {
-    private val query = MutableStateFlow("")
+    private val _query = MutableStateFlow("")
+    /** Bound to the search box directly so typing never waits on filtering. */
+    val query: StateFlow<String> = _query.asStateFlow()
     private val filter = MutableStateFlow(HistoryFilter.ALL)
 
-    val state: StateFlow<HistoryState> = combine(repo.movements, repo.products, query, filter) { all, products, q, f ->
+    val state: StateFlow<HistoryState> = combine(repo.movements, repo.products, _query, filter) { all, products, q, f ->
         val terms = q.trim().lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
         val filtered = all.filter { m ->
             val typeOk = when (f) {
@@ -90,9 +95,9 @@ class HistoryViewModel(repo: StockRepository) : ViewModel() {
             filtered = filtered,
             products = products.associateBy { it.id },
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistoryState())
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistoryState())
 
-    fun setQuery(q: String) { query.value = q }
+    fun setQuery(q: String) { _query.value = q }
     fun setFilter(f: HistoryFilter) { filter.value = f }
 }
 
@@ -119,6 +124,7 @@ private fun csv(movements: List<MovementEntity>): String = buildString {
 fun HistoryScreen(onOpenProduct: (Long) -> Unit) {
     val vm = appViewModel { c, _ -> HistoryViewModel(c.repository) }
     val state by vm.state.collectAsStateWithLifecycle()
+    val query by vm.query.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val pad = Modifier.padding(horizontal = 20.dp)
 
@@ -145,7 +151,7 @@ fun HistoryScreen(onOpenProduct: (Long) -> Unit) {
                         },
                     )
                 }
-                SearchBox(state.query, vm::setQuery, "Search product or note")
+                SearchBox(query, vm::setQuery, "Search product or note")
             }
         }
         item {

@@ -14,11 +14,13 @@ import com.example.tpglstock.data.local.ProductEntity
 import com.example.tpglstock.data.local.StockUnit
 import com.example.tpglstock.data.startOfDay
 import com.example.tpglstock.data.status
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 
 data class DayActivity(val dayStart: Long, val increase: Long, val decrease: Long, val updates: Int)
@@ -72,7 +74,7 @@ class DashboardViewModel(private val repo: StockRepository, settings: SettingsSt
             lastUpdate = movements.maxOfOrNull { it.timestamp },
             sync = status,
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DashboardState())
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DashboardState())
 
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()

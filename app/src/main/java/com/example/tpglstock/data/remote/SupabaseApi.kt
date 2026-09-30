@@ -18,10 +18,11 @@ class SupabaseApi(
     private val baseUrl: String = BuildConfig.SUPABASE_URL.trimEnd('/'),
     private val key: String = BuildConfig.SUPABASE_KEY,
 ) {
-    val configured: Boolean get() = baseUrl.isNotBlank() && key.isNotBlank()
+    /** Only HTTPS endpoints are accepted, so the key and stock data never travel in the clear. */
+    val configured: Boolean get() = baseUrl.startsWith("https://") && key.isNotBlank()
 
     /** Reads every row of [table], paging past the server's row limit. */
-    suspend fun selectAll(table: String, order: String): List<JSONObject> {
+    suspend fun selectAll(table: String, order: String): List<JSONObject> = withContext(Dispatchers.Default) {
         val rows = mutableListOf<JSONObject>()
         while (true) {
             val page = JSONArray(
@@ -32,8 +33,9 @@ class SupabaseApi(
                 ),
             )
             for (i in 0 until page.length()) rows += page.getJSONObject(i)
-            if (page.length() < PAGE) return rows
+            if (page.length() < PAGE) break
         }
+        rows
     }
 
     suspend fun rpc(function: String, args: JSONObject): String =
@@ -49,12 +51,14 @@ class SupabaseApi(
         body: String? = null,
         headers: Map<String, String> = emptyMap(),
     ): String = withContext(Dispatchers.IO) {
-        if (!configured) throw SupabaseException(null, "Supabase is not configured. Add SUPABASE_URL and SUPABASE_KEY to secrets.properties.")
+        if (!configured) throw SupabaseException(null, "Supabase is not configured. Add an https SUPABASE_URL and SUPABASE_KEY to secrets.properties.")
         val conn = URL("$baseUrl/$path").openConnection() as HttpURLConnection
         try {
             conn.requestMethod = method
             conn.connectTimeout = 15_000
             conn.readTimeout = 30_000
+            conn.useCaches = false
+            conn.instanceFollowRedirects = false
             conn.setRequestProperty("apikey", key)
             // Legacy anon keys are JWTs and also go in Authorization; new sb_publishable_ keys must not.
             if (!key.startsWith("sb_")) conn.setRequestProperty("Authorization", "Bearer $key")
@@ -63,7 +67,7 @@ class SupabaseApi(
             if (body != null) {
                 conn.doOutput = true
                 conn.setRequestProperty("Content-Type", "application/json")
-                conn.outputStream.use { it.write(body.toByteArray()) }
+                conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             }
             val code = conn.responseCode
             val text = (if (code < 400) conn.inputStream else conn.errorStream)

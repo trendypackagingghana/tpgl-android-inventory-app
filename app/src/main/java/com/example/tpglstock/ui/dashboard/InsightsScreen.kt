@@ -52,15 +52,17 @@ import com.example.tpglstock.ui.components.Panel
 import com.example.tpglstock.ui.components.SectionTitle
 import com.example.tpglstock.ui.theme.StockTheme
 import com.example.tpglstock.ui.theme.mono
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 
 class InsightsViewModel(repo: StockRepository) : ViewModel() {
     val summary: StateFlow<WeeklySummary?> = combine(repo.products, repo.movements, repo.status) { products, movements, status ->
         if (status.loaded) weeklySummary(products, movements) else null
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 }
 
 /** Last week's figures against a usual week, then concerns, tips and good signs. */

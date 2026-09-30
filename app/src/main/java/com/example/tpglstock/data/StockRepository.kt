@@ -6,6 +6,9 @@ import com.example.tpglstock.data.local.MovementType
 import com.example.tpglstock.data.local.ProductEntity
 import com.example.tpglstock.data.remote.SupabaseApi
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -80,8 +83,12 @@ class StockRepository(private val api: SupabaseApi, scope: CoroutineScope) {
     /** Reloads everything from Supabase. Throws on network or server errors. */
     suspend fun refresh() = refreshLock.withLock {
         try {
-            val products = api.selectAll("products", "category,size,name").map(::toProduct)
-            val movements = api.selectAll("movements", "occurred_at.desc,id.desc").map(::toMovement)
+            // Both tables load in parallel; parsing stays off the main thread.
+            val (products, movements) = withContext(Dispatchers.Default) {
+                val p = async { api.selectAll("products", "category,size,name").map(::toProduct) }
+                val m = async { api.selectAll("movements", "occurred_at.desc,id.desc").map(::toMovement) }
+                p.await() to m.await()
+            }
             _products.value = products
             _movements.value = movements
             _status.update { it.copy(loaded = true, error = null, lastSynced = System.currentTimeMillis()) }

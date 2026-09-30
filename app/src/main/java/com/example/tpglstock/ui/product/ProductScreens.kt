@@ -131,10 +131,11 @@ fun ProductDetailScreen(onBack: () -> Unit, onEdit: (Long) -> Unit, onLog: (Long
         }
         if (p == null) return@Column
 
-        val weekStart = startOfDay(System.currentTimeMillis()) - 6 * 24 * 60 * 60 * 1000L
-        val week = history.filter { it.timestamp >= weekStart }
-        val weekIn = week.filter { it.delta > 0 }.sumOf { it.delta }
-        val weekOut = week.filter { it.delta < 0 }.sumOf { -it.delta }
+        val (weekIn, weekOut) = remember(history) {
+            val weekStart = startOfDay(System.currentTimeMillis()) - 6 * 24 * 60 * 60 * 1000L
+            val week = history.filter { it.timestamp >= weekStart }
+            week.filter { it.delta > 0 }.sumOf { it.delta } to week.filter { it.delta < 0 }.sumOf { -it.delta }
+        }
 
         LazyColumn(
             Modifier.fillMaxSize(),

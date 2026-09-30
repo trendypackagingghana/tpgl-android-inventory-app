@@ -72,6 +72,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -82,6 +83,7 @@ class YouViewModel(private val repo: StockRepository, val settings: SettingsStor
 
     val weekUpdates: StateFlow<Int> = repo.movements
         .map { list -> list.count { it.timestamp >= weekStart && it.type != MovementType.OPENING } }
+        .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
     val sync: StateFlow<SyncStatus> = repo.status
 

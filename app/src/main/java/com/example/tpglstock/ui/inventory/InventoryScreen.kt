@@ -37,10 +37,13 @@ import com.example.tpglstock.ui.components.ProductItem
 import com.example.tpglstock.ui.components.ScreenTitle
 import com.example.tpglstock.ui.components.SearchBox
 import com.example.tpglstock.ui.components.SegmentTabs
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 
 enum class StatusFilter { ALL, ATTENTION, LOW, OUT }
@@ -57,7 +60,9 @@ data class InventoryState(
 )
 
 class InventoryViewModel(repo: StockRepository, handle: SavedStateHandle) : ViewModel() {
-    private val query = MutableStateFlow("")
+    private val _query = MutableStateFlow("")
+    /** Bound to the search box directly so typing never waits on filtering. */
+    val query: StateFlow<String> = _query.asStateFlow()
     private val status = MutableStateFlow(
         when (handle.get<String>("filter")) {
             "low" -> StatusFilter.LOW
@@ -68,7 +73,7 @@ class InventoryViewModel(repo: StockRepository, handle: SavedStateHandle) : View
     )
     private val category = MutableStateFlow<String?>(null)
 
-    val state: StateFlow<InventoryState> = combine(repo.products, query, status, category) { products, q, s, c ->
+    val state: StateFlow<InventoryState> = combine(repo.products, _query, status, category) { products, q, s, c ->
         val terms = q.trim().lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
         val filtered = products.filter { p ->
             val statusOk = when (s) {
@@ -90,9 +95,9 @@ class InventoryViewModel(repo: StockRepository, handle: SavedStateHandle) : View
             piecesOnHand = products.filter { it.unit == StockUnit.PCS }.sumOf { it.quantity },
             attentionCount = products.count { it.status != StockStatus.OK },
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), InventoryState(status = status.value))
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), InventoryState(status = status.value))
 
-    fun setQuery(q: String) { query.value = q }
+    fun setQuery(q: String) { _query.value = q }
     fun setStatus(s: StatusFilter) { status.value = s }
     fun setCategory(c: String) { category.value = if (category.value == c) null else c }
 }
@@ -101,6 +106,7 @@ class InventoryViewModel(repo: StockRepository, handle: SavedStateHandle) : View
 fun InventoryScreen(onOpenProduct: (Long) -> Unit, onNewProduct: () -> Unit) {
     val vm = appViewModel { c, h -> InventoryViewModel(c.repository, h) }
     val state by vm.state.collectAsStateWithLifecycle()
+    val query by vm.query.collectAsStateWithLifecycle()
     val pad = Modifier.padding(horizontal = 20.dp)
 
     LazyColumn(
@@ -113,7 +119,7 @@ fun InventoryScreen(onOpenProduct: (Long) -> Unit, onNewProduct: () -> Unit) {
                 ScreenTitle("Stock", "${state.productCount} products · ${state.piecesOnHand.grouped()} pcs on hand") {
                     PillButton(Icons.Rounded.Add, "New", onNewProduct)
                 }
-                SearchBox(state.query, vm::setQuery, "Search colour, size, product")
+                SearchBox(query, vm::setQuery, "Search colour, size, product")
                 SegmentTabs(
                     options = listOf(
                         StatusFilter.ALL to "All",

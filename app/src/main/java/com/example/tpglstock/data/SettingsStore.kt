@@ -43,7 +43,7 @@ class SettingsStore(context: Context) {
 
     private val _ai = MutableStateFlow(
         AiSettings(
-            apiKey = prefs.getString(KEY_API, "").orEmpty(),
+            apiKey = readApiKey(),
             model = prefs.getString(KEY_MODEL, null)?.takeIf { it.startsWith("deepseek") } ?: AiSettings.DEFAULT_MODEL,
         ),
     )
@@ -59,8 +59,10 @@ class SettingsStore(context: Context) {
     }
 
     fun save(settings: AiSettings) {
+        val key = settings.apiKey.trim()
         prefs.edit()
-            .putString(KEY_API, settings.apiKey.trim())
+            .apply { if (key.isEmpty()) remove(KEY_API_ENC) else putString(KEY_API_ENC, SecretBox.encrypt(key)) }
+            .remove(KEY_API)
             .putString(KEY_MODEL, settings.model.trim().ifBlank { AiSettings.DEFAULT_MODEL })
             .remove(KEY_PROMPT)
             .apply()
@@ -70,8 +72,20 @@ class SettingsStore(context: Context) {
         )
     }
 
+    /** Reads the encrypted key, moving any plain-text key from older versions into encrypted storage. */
+    private fun readApiKey(): String {
+        prefs.getString(KEY_API_ENC, null)?.let { return SecretBox.decrypt(it).orEmpty() }
+        val legacy = prefs.getString(KEY_API, null)?.trim().orEmpty()
+        if (legacy.isNotEmpty()) {
+            runCatching { prefs.edit().putString(KEY_API_ENC, SecretBox.encrypt(legacy)).remove(KEY_API).apply() }
+        }
+        return legacy
+    }
+
     private companion object {
+        /** Plain-text key from older versions; migrated on first read. */
         const val KEY_API = "deepseek_api_key"
+        const val KEY_API_ENC = "deepseek_api_key_enc"
         const val KEY_MODEL = "deepseek_model"
         const val KEY_PROMPT = "ai_custom_instructions"
         const val KEY_NAME = "user_name"
