@@ -81,7 +81,7 @@ import kotlinx.coroutines.launch
 /** Paste a WhatsApp update, review the suggested changes, save the ones that look right. */
 @Composable
 fun AssistantScreen(onBack: () -> Unit, onOpenSettings: () -> Unit) {
-    val vm = appViewModel { c, _ -> AiAssistantViewModel(c.repository, c.ai, c.settings) }
+    val vm = appViewModel { c, _ -> AiAssistantViewModel(c.repository, c.ai, c.settings, c.chatHistory) }
     val state by vm.state.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val name by (LocalContext.current.applicationContext as TPGLApp).container.settings.userName.collectAsStateWithLifecycle()
@@ -114,7 +114,7 @@ fun AssistantScreen(onBack: () -> Unit, onOpenSettings: () -> Unit) {
             }
             items(state.items, key = { it.id }) { item ->
                 when (item) {
-                    is ChatItem.User -> UserBubble(item.text)
+                    is ChatItem.User -> UserBubble(item.text, item.sentAt)
                     is ChatItem.Thinking -> ThinkingRow()
                     is ChatItem.Error -> ErrorBubble(item, onRetry = { vm.retry(item) }, onOpenSettings = onOpenSettings)
                     is ChatItem.Proposal -> ProposalCard(
@@ -200,10 +200,10 @@ private fun SetupBubble(onOpenSettings: () -> Unit) {
 }
 
 @Composable
-private fun UserBubble(text: String) {
+private fun UserBubble(text: String, sentAt: Long) {
     var expanded by remember { mutableStateOf(false) }
     val c = StockTheme.colors
-    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
             text,
             color = c.onInk,
@@ -218,6 +218,7 @@ private fun UserBubble(text: String) {
                 .animateContentSize()
                 .padding(horizontal = 14.dp, vertical = 12.dp),
         )
+        if (sentAt > 0) Text(formatDate(sentAt, "EEE d MMM, HH:mm"), style = MaterialTheme.typography.labelSmall, color = c.faint)
     }
 }
 

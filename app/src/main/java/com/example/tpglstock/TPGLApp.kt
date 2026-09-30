@@ -5,6 +5,7 @@ import com.example.tpglstock.ai.StockAiService
 import com.example.tpglstock.data.SettingsStore
 import com.example.tpglstock.data.StockRepository
 import com.example.tpglstock.data.remote.SupabaseApi
+import com.example.tpglstock.ui.addstock.ChatHistoryStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 
@@ -13,6 +14,7 @@ class AppContainer(app: Application, scope: CoroutineScope) {
     val repository = StockRepository(SupabaseApi(), scope)
     val settings = SettingsStore(app)
     val ai = StockAiService()
+    val chatHistory = ChatHistoryStore(app)
 }
 
 class TPGLApp : Application() {

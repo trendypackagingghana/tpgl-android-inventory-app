@@ -21,6 +21,10 @@ import com.example.tpglstock.data.toTitleCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -58,7 +62,7 @@ enum class ProposalStatus { PENDING, APPLYING, APPLIED, DISCARDED }
 sealed interface ChatItem {
     val id: Long
 
-    data class User(override val id: Long, val text: String) : ChatItem
+    data class User(override val id: Long, val text: String, val sentAt: Long = System.currentTimeMillis()) : ChatItem
     data class Thinking(override val id: Long) : ChatItem
     data class Error(override val id: Long, val message: String, val retryText: String) : ChatItem
     data class Proposal(
@@ -88,6 +92,7 @@ class AiAssistantViewModel(
     private val repo: StockRepository,
     private val ai: StockAiService,
     settingsStore: SettingsStore,
+    private val historyStore: ChatHistoryStore,
 ) : ViewModel() {
 
     val settings: StateFlow<AiSettings> = settingsStore.ai
@@ -95,6 +100,18 @@ class AiAssistantViewModel(
     private val ids = AtomicLong(0)
     private val _state = MutableStateFlow(AiState())
     val state: StateFlow<AiState> = _state.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            val saved = restore(historyStore.load())
+            ids.updateAndGet { maxOf(it, saved.maxOfOrNull(ChatItem::id) ?: 0) }
+            _state.update { it.copy(items = saved + it.items) }
+            _state.map { s -> s.items.filterNot { it is ChatItem.Thinking } }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { historyStore.save(it) }
+        }
+    }
 
     fun setInput(text: String) = _state.update { it.copy(input = text) }
 
@@ -247,8 +264,18 @@ class AiAssistantViewModel(
 
     private val chronological = compareBy<ProposalLine>({ it.timestamp ?: Long.MAX_VALUE }, { it.index })
 
-    /** Earlier exchanges so the model can resolve follow-ups. */
-    private fun history(): List<AiTurn> = _state.value.items.filterIsInstance<ChatItem.Proposal>().map { p ->
+    /** Links unsaved proposals from an earlier visit to today's stock so balances are current. */
+    private suspend fun restore(items: List<ChatItem>): List<ChatItem> {
+        if (items.none { it is ChatItem.Proposal && it.status == ProposalStatus.PENDING }) return items
+        val byId = repo.products.first().associateBy { it.id }
+        return items.map { item ->
+            if (item !is ChatItem.Proposal || item.status != ProposalStatus.PENDING) item
+            else item.copy(lines = recompute(item.lines.map { l -> l.copy(product = l.product?.let { byId[it.id] ?: it }) }))
+        }
+    }
+
+    /** Recent exchanges so the model can resolve follow-ups. */
+    private fun history(): List<AiTurn> = _state.value.items.filterIsInstance<ChatItem.Proposal>().takeLast(MAX_CONTEXT_TURNS).map { p ->
         AiTurn(
             userText = p.userText,
             assistantText = buildString {
@@ -274,6 +301,9 @@ class AiAssistantViewModel(
     }
 
     private companion object {
+        /** Older exchanges stay visible but aren't sent to the model. */
+        const val MAX_CONTEXT_TURNS = 5
+
         fun parseDay(date: String): Long? = runCatching {
             val parsed = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }.parse(date)!!
             Calendar.getInstance().apply {
